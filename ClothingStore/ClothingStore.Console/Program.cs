@@ -1,71 +1,124 @@
 ﻿using System;
 using System.Linq;
-using ClothingStore.Common;
+using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using ClothingStore.Infrastructure;
+using ClothingStore.Infrastructure.Models;
+using ClothingStore.Infrastructure.Repositories;
 
-class Program
+namespace ClothingStore.ConsoleApp
 {
-    static void Main()
+    internal class Program
     {
-        Console.OutputEncoding = System.Text.Encoding.UTF8;
-        Console.WriteLine($"=== Вас вітає: {Product.StoreName} ===\n");
-
-        var tshirtService = new CrudService<TShirt>();
-
-        var tshirt1 = new TShirt
+        static async Task Main(string[] args)
         {
-            Brand = "Nike Sportswear",
-            Color = "Чорний",
-            Size = "L",
-            Material = "Бавовна",
-            HasPrint = true,
-            Price = 1200m
-        };
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
+            Console.WriteLine("=== Лабораторна робота №3: Entity Framework Core та SQLite ===");
 
-        tshirt1.PriceChanged += message => Console.WriteLine(message);
+            using var context = new ClothingStoreContext();
+            await context.Database.MigrateAsync();
 
-        Console.WriteLine("1. Створення елементів (Create):");
-        tshirtService.Create(tshirt1);
+            var repository = new Repository<TShirtModel>(context);
+            var crudService = new ProductDbCrudService(context, repository);
+            if (!context.Categories.Any())
+            {
+                Console.WriteLine("\n[1] Ініціалізація бази даних початковими записами...");
 
-        var tshirt2 = new TShirt
-        {
-            Brand = "Adidas Originals",
-            Color = "Білий",
-            Size = "M",
-            Material = "Поліестер",
-            HasPrint = false,
-            Price = 950m
-        };
-        tshirtService.Create(tshirt2);
-        Console.WriteLine("Товари успішно додано до сервісу.");
+                var casualCategory = new CategoryModel { Name = "Повсякденний одяг" };
+                var sportCategory = new CategoryModel { Name = "Спортивний одяг" };
+                await context.Categories.AddRangeAsync(casualCategory, sportCategory);
+                await context.SaveChangesAsync();
 
-        Console.WriteLine("\n2. Виклик методу розширення (знижка 15%):");
-        tshirt1.ApplyDiscount(15);
+                var customerOrder = new OrderModel
+                {
+                    CustomerName = "Олександр Коваленко",
+                    OrderDate = DateTime.UtcNow
+                };
+                await context.Orders.AddAsync(customerOrder);
+                await context.SaveChangesAsync();
 
-        Console.WriteLine("\n3. Перегляд списку товарів (ReadAll):");
-        foreach (var item in tshirtService.ReadAll())
-        {
-            item.ShowInfo();
+                var tshirt1 = new TShirtModel
+                {
+                    Brand = "Nike",
+                    Color = "Чорний",
+                    Price = 1299.99m,
+                    Size = "L",
+                    Material = "100% Бавовна",
+                    HasPrint = true,
+                    CategoryId = sportCategory.Id,
+                    Details = new ProductDetailsModel
+                    {
+                        Sku = "NK-TSH-001",
+                        CountryOfOrigin = "В'єтнам",
+                        CareInstructions = "Прання при 30°C, не відбілювати"
+                    }
+                };
+                tshirt1.Orders.Add(customerOrder);
+
+                var tshirt2 = new TShirtModel
+                {
+                    Brand = "Zara",
+                    Color = "Білий",
+                    Price = 799.50m,
+                    Size = "M",
+                    Material = "Органічна бавовна",
+                    HasPrint = false,
+                    CategoryId = casualCategory.Id,
+                    Details = new ProductDetailsModel
+                    {
+                        Sku = "ZR-TSH-002",
+                        CountryOfOrigin = "Португалія",
+                        CareInstructions = "Делікатне прання"
+                    }
+                };
+                tshirt2.Orders.Add(customerOrder);
+
+                var tshirt3 = new TShirtModel
+                {
+                    Brand = "Adidas",
+                    Color = "Синій",
+                    Price = 1150.00m,
+                    Size = "XL",
+                    Material = "Поліестер ClimaCool",
+                    HasPrint = true,
+                    CategoryId = sportCategory.Id,
+                    Details = new ProductDetailsModel
+                    {
+                        Sku = "AD-TSH-003",
+                        CountryOfOrigin = "Камбоджа",
+                        CareInstructions = "Швидке сушіння"
+                    }
+                };
+
+                await crudService.CreateAsync(tshirt1);
+                await crudService.CreateAsync(tshirt2);
+                await crudService.CreateAsync(tshirt3);
+
+                Console.WriteLine("Базу даних успішно заповнено тестовими записами!");
+            }
+
+            Console.WriteLine("\n[2] Отримання всіх товарів із БД через CRUD-сервіс (включаючи зв'язки):");
+            var allProducts = await crudService.ReadAllAsync();
+            foreach (var item in allProducts)
+            {
+                Console.WriteLine($"--------------------------------------------------");
+                Console.WriteLine($"ID: {item.Id} | Бренд: {item.Brand} | Колір: {item.Color} | Ціна: {item.Price:C}");
+                Console.WriteLine($"Розмір: {item.Size} | Матеріал: {item.Material} | Принт: {(item.HasPrint ? "Так" : "Ні")}");
+                Console.WriteLine($"Категорія (1-до-багатьох): {item.Category?.Name ?? "Не вказано"}");
+                Console.WriteLine($"Деталі (1-до-1): Артикул {item.Details?.Sku}, Країна: {item.Details?.CountryOfOrigin}");
+                Console.WriteLine($"Кількість замовлень (багато-до-багатьох): {item.Orders.Count}");
+            }
+
+            Console.WriteLine("\n[3] Демонстрація пагінації (Сторінка 1, по 2 елементи):");
+            var pagedProducts = await crudService.ReadAllAsync(page: 1, amount: 2);
+            foreach (var item in pagedProducts)
+            {
+                Console.WriteLine($"-> {item.Brand} ({item.Color}, розмір {item.Size}) - {item.Price:C}");
+            }
+
+            Console.WriteLine("\nРоботу з базою даних SQLite успішно завершено!");
+            Console.WriteLine("Натисніть будь-яку клавішу для виходу...");
+            Console.ReadKey();
         }
-
-        Console.WriteLine("\n4. Оновлення товару (Update):");
-        tshirt2.Price = 850m;
-        tshirt2.Color = "Молочний";
-        tshirtService.Update(tshirt2);
-        Console.WriteLine($"Оновлений Adidas: {tshirtService.Read(tshirt2.Id).Color}, ціна: {tshirtService.Read(tshirt2.Id).Price} грн");
-
-        string path = "clothing_backup.json";
-        Console.WriteLine($"\n5. Збереження списку товарів у JSON-файл '{path}'...");
-        tshirtService.Save(path);
-
-        Console.WriteLine("Завантаження даних у новий сервіс із файлу:");
-        var restoredService = new CrudService<TShirt>();
-        restoredService.Load(path);
-        Console.WriteLine($"Успішно відновлено об'єктів: {restoredService.ReadAll().Count()} шт.");
-
-        Console.WriteLine("\n6. Видалення товару (Remove):");
-        restoredService.Remove(tshirt1);
-        Console.WriteLine($"Кількість після видалення: {restoredService.ReadAll().Count()} шт.");
-
-        Console.WriteLine($"\nВсього створено товарів: {Product.TotalItemsCreated}");
     }
 }
